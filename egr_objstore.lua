@@ -1,47 +1,47 @@
+--[[
 
---content-addressable object store
+content-addressable object store
+
+	objstore:new(backend, backend_args...) -> store
+	store:store_string(s) -> hash
+	store:move_file(path) -> hash
+	store:copy_file(path) -> hash
+	store:get_string(hash) -> s | nil
+	store:get_file(hash) -> filename | nil
+	store:remove(hash)
+
+upcoming features:
+
+	- abort on I/O errors
+	- async I/O queue
+	- mirroring
+		- async on backup mirrors even when sync op requested
+	- spreading on multiple disks
+		- spread policy based on free space
+	- mysql backend
+	- transparent encryption (dokan, osxfuse, fuse)
+		- need dokan or pismo on Windows (dokan has problems with mmap)
+			- see how maidsafe uses it
+
+]]
 
 local ffi = require'ffi'
 local lfs = require'lfs'
+local fs = require'egr_fs'
 local glue = require'glue'
 local sha2 = require'sha2'
 local stdio = require'stdio'
 local _ = string.format
 
+local hash_digest = sha2.sha256_digest
+
+--objstore
+
 local objstore = {}
 objstore.__index = objstore
 
-local function splitpath(path)
-	local dir, file = path:match'^(.-)[/]([^/]+)$'
-	return dir, file
-end
-
-local function mkdir(path0) --recursive mkdir
-	local path = path0
-	local t = {}
-	local ok, err
-	if lfs.attributes(path, 'mode') == 'directory' then
-		return
-	end
-	while path do
-		ok, err = lfs.mkdir(path)
-		if ok then
-			for i=#t,1,-1 do
-				assert(lfs.mkdir(t[i]))
-			end
-			return
-		elseif err:find'^No such file' then
-			table.insert(t, path)
-		else
-			break
-		end
-		path = splitpath(path)
-	end
-	error(_('%s for %s', err, path0))
-end
-
 function objstore:init_filesystem(path)
-	self._basepath = glue.bin .. '/' .. path
+	self._basepath = fs.script_path() .. '/' .. path
 end
 
 function objstore:new(backend, ...)
@@ -50,82 +50,68 @@ function objstore:new(backend, ...)
 	return self
 end
 
-function objstore:hash(buf, len)
-	return sha2.sha256(buf, len)
-end
-
-function objstore:hash_digest()
-	return sha2.sha256_digest()
-end
-
-function objstore:hash_path(hash)
+function objstore:get_path(hash)
 	local hash = glue.tohex(hash)
 	-- 3-level deep, up to 4096 files per directory and 2^36 directories.
 	return self._basepath .. '/' ..
 		hash:gsub('^(...)(...)(...)', '%1/%2/%3/')
 end
 
+function objstore:get_file(hash)
+	local path = self:get_path(hash)
+	return fs.file_exists(path) and path or nil
+end
+
 function objstore:store_string(s)
-	local hash = self:hash(s)
-	local path = self:hash_path(hash)
-	local dir = splitpath(path)
-	mkdir(dir)
-	local f = assert(io.open(path, 'w'))
-	f:write(s)
-	f:close()
+	local digest = hash_digest()
+	digest(s)
+	local hash = digest()
+	local path = self:get_path(hash)
+	if not fs.file_exists(path) then
+		fs.mkdir_for(path)
+		glue.writefile(path, s)
+	end
 	return hash
 end
 
-function objstore:get_as_string(hash)
-	local path = self:hash_path(hash)
-	local f = assert(io.open(path, 'rb'))
-	local s = assert(f:read'*a')
-	f:close()
-	return s
+function objstore:get_string(hash)
+	local path = self:get_file(hash)
+	return path and glue.readfile(path)
+end
+
+function objstore:hash_file(path)
+	local digest = hash_digest()
+	fs.read_file(path, digest)
+	return digest()
 end
 
 function objstore:move_file(path)
-	local f = io.open(path, 'rb')
-	local sz = 1024 * 16
-	local buf = ffi.new('uint8_t[?]', sz)
-	local digest = self:hash_digest()
-	while true do
-		local len = assert(stdio.read(f, buf, sz))
-		if len > 0 then
-			digest(buf, len)
-		end
-		if len < sz then break end
-	end
-	local hash = digest()
-	f:close()
-	local dst_path = self:hash_path(hash)
-	if lfs.attributes(dst_path, 'mode') ~= 'file' then
-		local dir = splitpath(dst_path)
-		mkdir(dir)
+	local hash = self:hash_file(path)
+	local dst_path = self:get_path(hash)
+	if not fs.file_exists(dst_path) then
+ 		fs.mkdir_for(dst_path)
 		assert(os.rename(path, dst_path))
 	end
 	return hash
 end
 
 function objstore:copy_file(path)
-	--
-end
-
-function objstore:get_as_file(hash)
-	--
-end
-
-function objstore:get_as_mmap(hash)
-	--
+	local hash = self:hash_file(path)
+	local dst_path = self:get_path(hash)
+	fs.mkdir_for(dst_path)
+	fs.copy_file(path, dst_path)
+	return hash
 end
 
 function objstore:remove(hash)
-	local path = self:hash_path(hash)
-	assert(os.remove(path))
-	path = splitpath(path)
-	while path do
-		lfs.rmdir(path)
-		path = splitpath(path)
+	local path = self:get_path(hash)
+	if fs.file_exists(path) then
+		assert(os.remove(path))
+	end
+	local dir = fs.split_path(path)
+	while dir and fs.file_exists(dir, 'directory') do
+		lfs.rmdir(dir)
+		dir = fs.split_path(dir)
 	end
 end
 
@@ -136,21 +122,24 @@ if not ... then
 
 	local s = 'hello!'
 	local hash = store:store_string(s)
-	local s1 = store:get_as_string(hash)
-	assert(s == s1)
+	assert(store:get_string(hash) == s)
 	store:remove(hash)
 
 	local s = 'hello2!'
 	local file = 'objstore-test'
-	local f = io.open(file, 'wb')
-	f:write(s)
-	f:close()
+	glue.writefile(file, s)
 	local hash = store:move_file(file)
-	local s1 = store:get_as_string(hash)
-	assert(s == s1)
+	assert(store:get_string(hash) == s)
+	store:remove(hash)
+
+	local s = 'hello3!'
+	local file = 'objstore-test'
+	glue.writefile(file, s)
+	local hash = store:copy_file(file)
+	assert(os.remove(file))
+	assert(store:get_string(hash) == s)
 	store:remove(hash)
 
 end
-
 
 return objstore
