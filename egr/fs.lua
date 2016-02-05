@@ -1,8 +1,4 @@
-
-local lfs = require'lfs'
-local glue = require'glue'
-local ffi = require'ffi'
-local stdio = require'stdio'
+setfenv(1, require'egr.ns')
 
 local fs = {}
 
@@ -43,6 +39,26 @@ end
 function fs.mkdir_for(path)
 	local dir = fs.split_path(path)
 	fs.mkdir(dir)
+end
+
+function fs.dir(path, func) --recursive dir
+	if not func then
+		return coroutine.wrap(function()
+			fs.dir(path, coroutine.yield)
+		end)
+	end
+	for file in lfs.dir(path) do
+		local path = path .. '/' .. file
+		local mode = lfs.attributes(path, 'mode')
+		if mode == 'directory' then
+			if file ~= '.' and file ~= '..' then
+				func(path, mode)
+				fs.dir(path, func)
+			end
+		else
+			func(path, mode)
+		end
+	end
 end
 
 function fs.file_exists(path, type)

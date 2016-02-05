@@ -1,3 +1,5 @@
+setfenv(1, require'egr.ns')
+
 --[[
 
 content-addressable object store
@@ -25,29 +27,18 @@ upcoming features:
 
 ]]
 
-local ffi = require'ffi'
-local lfs = require'lfs'
-local fs = require'egr_fs'
-local glue = require'glue'
-local sha2 = require'sha2'
-local stdio = require'stdio'
-local _ = string.format
-
 local hash_digest = sha2.sha256_digest
 
 --objstore
 
-local objstore = {}
-objstore.__index = objstore
+local objstore = class()
 
 function objstore:init_filesystem(path)
 	self._basepath = fs.script_path() .. '/' .. path
 end
 
-function objstore:new(backend, ...)
-	local self = setmetatable({}, self)
+function objstore:init(backend, ...)
 	self['init_'..backend](self, ...)
-	return self
 end
 
 function objstore:get_path(hash)
@@ -77,6 +68,15 @@ end
 function objstore:get_string(hash)
 	local path = self:get_file(hash)
 	return path and glue.readfile(path)
+end
+
+function objstore:store_value(x)
+	return self:store_string(pp.format(x, '\t'))
+end
+
+function objstore:get_value(hash)
+	local s = self:get_string(hash)
+	return s and loadstring('return '..s)()
 end
 
 function objstore:hash_file(path)

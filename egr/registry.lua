@@ -1,17 +1,10 @@
+setfenv(1, require'egr.ns')
 
-local glue = require'glue'
-local pp = require'pp'
-local lfs = require'lfs'
-local fs = require'egr_fs'
+local reg = class()
 
-local reg = {}
-reg.__index = reg
-
-function reg:new(regfile)
-	local self = setmetatable({}, self)
+function reg:init(regfile)
 	self.regfile = fs.script_path() .. '/' .. regfile
 	self:load()
-	return self
 end
 
 function reg:load()
