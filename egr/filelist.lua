@@ -36,7 +36,7 @@ function fl:checkout(dst_path)
 	end
 end
 
-function fl:checkin(src_path)
+function fl:add_dir(src_path)
 	for path, mode in fs.dir(src_path) do
 		if mode == 'file' then
 			local hash = objstore:copy_file(path)

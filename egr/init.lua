@@ -46,6 +46,7 @@ map = require'egr.map'
 filelist = require'filelist'
 shell = require'egr.shell'
 freezer = require'egr.freezer'
+repo = require'egr.repo'
 
 --singletons
 

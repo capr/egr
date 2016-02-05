@@ -76,7 +76,7 @@ end
 
 function objstore:get_value(hash)
 	local s = self:get_string(hash)
-	return s and loadstring('return '..s)()
+	return s and loadstring('	return '..s)()
 end
 
 function objstore:hash_file(path)
@@ -98,8 +98,10 @@ end
 function objstore:copy_file(path)
 	local hash = self:hash_file(path)
 	local dst_path = self:get_path(hash)
-	fs.mkdir_for(dst_path)
-	fs.copy_file(path, dst_path)
+	if not fs.file_exists(dst_path) then
+		fs.mkdir_for(dst_path)
+		fs.copy_file(path, dst_path)
+	end
 	return hash
 end
 

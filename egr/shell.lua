@@ -54,12 +54,24 @@ end
 
 function shell:run()
 
-	local fl = filelist:new()
-	fl:checkin'../bin'
-	fl:checkout'xx'
-	local t = fl:freeze(fl)
-	local hash = objstore:store_value(t)
+	local repo = repo:new()
+
+	local files = filelist:new()
+	files:add_dir'../bin'
+	files:checkout'xx'
+	local hash = freezer:freeze(files)
 	print(glue.tohex(hash))
+	repo:commit(hash, 'init')
+
+	files:add_dir'../jit'
+	local hash = freezer:freeze(files)
+	print(glue.tohex(hash))
+	repo:commit(hash, 'new stuff')
+	pp(repo.root_commit)
+
+	local hash = freezer:freeze(repo)
+	print(glue.tohex(hash))
+	config:set('repo', hash)
 
 	do return end
 
