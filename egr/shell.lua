@@ -32,11 +32,11 @@ function shell:init()
 		local bmp = win:bitmap()
 	end
 
-	function win:keydown(key)
+	win:on('keydown', function(key)
 		if key == 'esc' then
 			self:close()
 		end
-	end
+	end)
 
 	function win:closed()
 		local x, y, w, h = self:normal_frame_rect()
@@ -54,6 +54,7 @@ end
 
 function shell:run()
 
+	--[[
 	local repo = repo:new()
 
 	local files = filelist:new()
@@ -74,6 +75,7 @@ function shell:run()
 	config:set('repo', hash)
 
 	do return end
+	]]
 
 	self.win:show()
 	self.app:run()
